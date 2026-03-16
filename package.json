@@ -7,7 +7,9 @@
   "scripts": {
     "checkFormat": "prettier . --check",
     "lint": "eslint --cache .",
-    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+    "test:jest": "node --experimental-vm-modules node_modules/jest/bin/jest.js --forceExit",
+    "test:integration": "node --test 'test/integration/*.test.mjs'",
+    "test": "npm run test:jest && npm run test:integration"
   },
   "repository": {
     "type": "git",
@@ -34,7 +36,6 @@
   },
   "jest": {
     "globalSetup": "./test/js/globalSetup.js",
-    "globalTeardown": "./test/js/globalTeardown.js",
     "setupFilesAfterEnv": [
       "./test/js/setupTests.js"
     ],
