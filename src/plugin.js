@@ -61,12 +61,20 @@ function getPlugins(opts) {
   return Array.from(plugins);
 }
 
+// Counter to ensure unique temp file paths when spawning multiple servers
+// with different plugin configurations.
+let serverCounter = 0;
+
 // Create a file that will act as a communication mechanism, spawn a parser
 // server with that filepath as an argument, then wait for the file to be
 // created that will contain the connection information.
 export async function spawnServer(opts, killOnExit = true) {
   const tmpdir = os.tmpdir();
-  const filepath = path.join(tmpdir, `prettier-ruby-parser-${process.pid}.txt`);
+  const suffix = serverCounter++;
+  const filepath = path.join(
+    tmpdir,
+    `prettier-ruby-parser-${process.pid}-${suffix}.txt`
+  );
 
   const options = {
     env: Object.assign({}, process.env, { LANG: getLang() }),
@@ -143,16 +151,40 @@ export async function spawnServer(opts, killOnExit = true) {
   });
 }
 
-let connectionOptions;
-if (process.env.PRETTIER_RUBY_HOST) {
-  connectionOptions = JSON.parse(process.env.PRETTIER_RUBY_HOST);
+// Pre-configured server connection from environment (used by test suite).
+const envConnectionOptions = process.env.PRETTIER_RUBY_HOST
+  ? JSON.parse(process.env.PRETTIER_RUBY_HOST)
+  : null;
+
+// Map from plugin configuration key to a Promise that resolves to the
+// connection options for that server. Using promises as values prevents
+// duplicate spawns when concurrent parse calls share the same config.
+const servers = new Map();
+
+// Derive a stable key from the options that affect server-level behavior
+// (i.e. which syntax_tree plugins are loaded). Options like printWidth and
+// tabWidth are sent per-request and do not need to be part of the key.
+function serverKey(opts) {
+  return getPlugins(opts).sort().join(",");
 }
 
 // Formats and sends an asynchronous request to the parser server.
 async function parse(parser, source, opts) {
-  if (!connectionOptions) {
-    const spawnedServer = await spawnServer(opts);
-    connectionOptions = spawnedServer.connectionOptions;
+  let connOpts;
+
+  if (envConnectionOptions) {
+    connOpts = envConnectionOptions;
+  } else {
+    const key = serverKey(opts);
+
+    if (!servers.has(key)) {
+      servers.set(
+        key,
+        spawnServer(opts).then((s) => s.connectionOptions)
+      );
+    }
+
+    connOpts = await servers.get(key);
   }
 
   return new Promise((resolve, reject) => {
@@ -176,13 +208,13 @@ async function parse(parser, source, opts) {
           error.loc = response.loc;
         }
 
-        reject(error);
+        return reject(error);
       }
 
       resolve(response);
     });
 
-    socket.connect(connectionOptions, () => {
+    socket.connect(connOpts, () => {
       socket.end(
         JSON.stringify({
           parser,
