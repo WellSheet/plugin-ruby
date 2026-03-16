@@ -84,7 +84,9 @@ export async function spawnServer(opts, killOnExit = true) {
 
   if (opts.filepath) {
     const prettierConfig = await resolveConfigFile(opts.filepath);
-    options.cwd = path.dirname(prettierConfig);
+    if (prettierConfig) {
+      options.cwd = path.dirname(prettierConfig);
+    }
   }
 
   const server = spawn(
@@ -151,11 +153,6 @@ export async function spawnServer(opts, killOnExit = true) {
   });
 }
 
-// Pre-configured server connection from environment (used by test suite).
-const envConnectionOptions = process.env.PRETTIER_RUBY_HOST
-  ? JSON.parse(process.env.PRETTIER_RUBY_HOST)
-  : null;
-
 // Map from plugin configuration key to a Promise that resolves to the
 // connection options for that server. Using promises as values prevents
 // duplicate spawns when concurrent parse calls share the same config.
@@ -170,22 +167,16 @@ function serverKey(opts) {
 
 // Formats and sends an asynchronous request to the parser server.
 async function parse(parser, source, opts) {
-  let connOpts;
+  const key = serverKey(opts);
 
-  if (envConnectionOptions) {
-    connOpts = envConnectionOptions;
-  } else {
-    const key = serverKey(opts);
-
-    if (!servers.has(key)) {
-      servers.set(
-        key,
-        spawnServer(opts).then((s) => s.connectionOptions)
-      );
-    }
-
-    connOpts = await servers.get(key);
+  if (!servers.has(key)) {
+    servers.set(
+      key,
+      spawnServer(opts).then((s) => s.connectionOptions)
+    );
   }
+
+  const connOpts = await servers.get(key);
 
   return new Promise((resolve, reject) => {
     const socket = new net.Socket();
